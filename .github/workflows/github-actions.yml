@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/rechtspraak-citations-extractor/
+      url: https://test.pypi.org/project/rechtspraak_citations_extraction/
     permissions:
       id-token: write
 
