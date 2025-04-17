@@ -140,7 +140,7 @@ def citations_multithread_single(
         (
             case_citations_incoming,
             case_citations_outgoing,
-            legislation_citations
+            legislation_citations,
         ) = find_citations_for_case_retrying(
             0,
             remove_spaces_from_ecli(ecli),
