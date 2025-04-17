@@ -12,3 +12,4 @@ six
 tqdm
 tzdata
 urllib3
+python-dotenv
