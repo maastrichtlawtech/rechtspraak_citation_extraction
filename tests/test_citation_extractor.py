@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 from rechtspraak_citations_extractor.citations_extractor import get_citations
+
 load_dotenv()
 
 
