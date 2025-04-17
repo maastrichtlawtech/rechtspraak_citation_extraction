@@ -1,0 +1,15 @@
+certifi
+charset-normalizer
+idna
+lxml
+numpy
+pandas
+python-dateutil
+pytz
+rdflib
+requests
+six
+tqdm
+tzdata
+urllib3
+python-dotenv

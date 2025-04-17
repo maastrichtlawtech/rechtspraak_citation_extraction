@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rechtspraak_citations_extractor"
+readme = {file = "README.md", content-type = "text/markdown"}
+version = "1.1.0"
+requires-python = ">= 3.9"
+description = "Library for extracting rechtspraak citations for provided ECLIs"
+authors = [
+    { name = "LawTech Lab", email = "law-techlab@maastrichtuniversity.nl" }
+]
+license = { file = "LICENSE" }
+keywords = ["rechtspraak", "citations", "extractor"]
+dependencies = [
+    "certifi",
+    "charset-normalizer",
+    "idna",
+    "lxml",
+    "numpy",
+    "pandas",
+    "python-dateutil",
+    "pytz",
+    "requests",
+    "six",
+    "tqdm",
+    "tzdata",
+    "rdflib",
+    "urllib3",
+    "python-dotenv",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/maastrichtlawtech/rechtspraak_citation_extraction/issues"
+"Build Source" = "https://github.com/maastrichtlawtech/rechtspraak_citation_extraction/"
+
+[tool.setuptools.packages.find]
+include = ["rechtspraak_citations_extractor"]
+namespaces = false
