@@ -137,15 +137,17 @@ def citations_multithread_single(
     legislations_df = pd.Series([], dtype="string")
     for i, ecli in enumerate(ecli):
         index = current_index + i
-        case_citations_incoming, case_citations_outgoing, legislation_citations = (
-            find_citations_for_case_retrying(
-                0,
-                remove_spaces_from_ecli(ecli),
-                case_citations_fieldnames,
-                legislation_citations_fieldnames,
-                username,
-                password,
-            )
+        (
+            case_citations_incoming,
+            case_citations_outgoing,
+            legislation_citations
+        ) = find_citations_for_case_retrying(
+            0,
+            remove_spaces_from_ecli(ecli),
+            case_citations_fieldnames,
+            legislation_citations_fieldnames,
+            username,
+            password,
         )
         if case_citations_incoming:
             encoded = json.dumps(case_citations_incoming)
