@@ -7,6 +7,8 @@ import pandas as pd
 import rdflib
 import requests
 
+import xml.etree.ElementTree as ET
+
 # from dotenv import load_dotenv
 from lxml import etree
 from requests.auth import HTTPBasicAuth
@@ -52,17 +54,20 @@ def get_lido_response(url, username, password):
         )
 
 
-# Extract the ECLI code from the LIDO identifier of the cited case law from the XML response from LIDO API
+# Extract the ECLI code from the LIDO identifier of the cited case
+# law from the XML response from LIDO API
 def get_ecli(sub_ref):
     return sub_ref.attrib["idref"].split("/")[-1]
 
 
-# Extract the LIDO identifier of the cited legislation from the XML response from LIDO API
+# Extract the LIDO identifier of the cited legislation from the
+# XML response from LIDO API
 def get_legislation_identifier(sub_ref):
     return sub_ref.attrib["idref"]
 
 
-# Find the webpage expressing, in writing, the legislation referred to by the input LIDO identifier
+# Find the webpage expressing, in writing, the legislation referred to
+# by the input LIDO identifier
 def get_legislation_webpage(identifier):
     idcomponents = identifier.split("/")
     date = idcomponents[len(idcomponents) - 1]
@@ -89,22 +94,26 @@ def get_legislation_name(url, username, password):
     title = ""
     # RDF main element (root)
     for element in xml.iterchildren():
-        # there is only one child and it is the "description" in which the rest of the info is
+        # there is only one child and it is the "description" in which
+        # the rest of the info is
         # go through all the tags (all the info)
         for el in element.iterchildren():
-            # the title (same thing as the preLabel) is the feature we want to be using
+            # the title (same thing as the preLabel) is the feature
+            # we want to be using
             if el.tag == "{http://purl.org/dc/terms/}title":
                 title = el.text
 
     return title
 
 
-# Check if outgoing links in the XML response from the LIDO API are of type "Jurisprudentie" (case law)
+# Check if outgoing links in the XML response from the LIDO API are of type
+# "Jurisprudentie" (case law)
 def is_case_law(sub_ref):
     return sub_ref.attrib["groep"] == "Jurisprudentie"
 
 
-# Check if outgoing links in the XML response from the LIDO API are of type "Wet" (legislation)
+# Check if outgoing links in the XML response from the LIDO API are of type
+# "Wet" (legislation)
 def is_legislation(sub_ref):
     return sub_ref.attrib["groep"] == "Wet" or sub_ref.attrib["groep"] == "Artikel"
 
@@ -117,8 +126,10 @@ def get_lido_id(ecli):
 
 # Method written by Marion
 """
-These methods are used to write the citations incrementally to the csv file (in case it crashes or times out). 
-It allows us to stop the script whenever we want without loosing our data, and without having to start from the bginning the next time. 
+These methods are used to write the citations incrementally to the csv file
+(in case it crashes or times out).
+It allows us to stop the script whenever we want without loosing our data,
+and without having to start from the bginning the next time.
 """
 
 
@@ -126,15 +137,20 @@ def citations_multithread_single(
     big_incoming,
     big_outgoing,
     big_legislations,
+    bwbs,
+    opschrifts,
     ecli,
     username,
     password,
     current_index,
     bar,
+    extract_opschrift,
 ):
     incoming_df = pd.Series([], dtype="string")
     outgoing_df = pd.Series([], dtype="string")
     legislations_df = pd.Series([], dtype="string")
+    bwbs_df = pd.Series([], dtype="string")
+    opschrifts_df = pd.Series([], dtype="object")
     for i, ecli in enumerate(ecli):
         index = current_index + i
         (
@@ -158,10 +174,46 @@ def citations_multithread_single(
         if legislation_citations:
             encoded = json.dumps(legislation_citations)
             legislations_df[index] = encoded
+            # Update bwbs_df with bwb_id extracted with regex from legsilations_df[index]
+            match = re.search(r"bwb/id/([^/]+)", legislations_df[index])
+            if match:
+                bwb_id = match.group(1)
+                bwbs_df[index] = bwb_id
+            else:
+                bwbs_df[index] = None
+        if extract_opschrift:
+            opschrift = extract_opschrift_from_xml(remove_spaces_from_ecli(ecli))
+            if opschrift:
+                opschrifts_df[index] = opschrift
+            else:
+                opschrifts_df[index] = None
+
         bar.update(1)
     big_incoming.append(incoming_df)
     big_outgoing.append(outgoing_df)
     big_legislations.append(legislations_df)
+    bwbs.append(bwbs_df)
+    if extract_opschrift:
+        opschrifts.append(opschrifts_df)
+
+
+def extract_opschrift_from_xml(ecli):
+    _response = requests.get(get_lido_id(ecli))
+    if _response.status_code != 200:
+        logging.error(f"Failed to fetch XML for ECLI {ecli}")
+        return None
+    root = ET.fromstring(_response.content)
+    namespaces = {"overheidrl": "http://linkeddata.overheid.nl/terms/"}
+    opschrift_set = set()
+    for refereert_aan in root.findall(".//overheidrl:refereertAan", namespaces):
+        if refereert_aan.text:
+            parts = refereert_aan.text.split("|")
+            for part in parts:
+                if part.startswith("opschrift="):
+                    opschrift_value = part.replace("opschrift=", "").strip()
+                    for value in opschrift_value.split(","):
+                        opschrift_set.add(value.strip())
+    return list(opschrift_set) if opschrift_set else None
 
 
 def add_column_from_list(data, name, list):
@@ -170,7 +222,9 @@ def add_column_from_list(data, name, list):
     data.insert(1, name, column)
 
 
-def find_citations_for_cases_multithread(dataframe, username, password, threads):
+def find_citations_for_cases_multithread(
+    dataframe, username, password, threads, extract_opschrift
+):
     ecli = dataframe["ecli"].dropna().reset_index(drop=True)
     length = ecli.size
     at_once_threads = int(length / threads)
@@ -178,7 +232,8 @@ def find_citations_for_cases_multithread(dataframe, username, password, threads)
     big_outgoing = []
     big_legislations = []
     threads = []
-    bwb_list = []
+    bwbs = []
+    opschrifts = []
     bar = tqdm(
         total=length,
         colour="GREEN",
@@ -196,11 +251,14 @@ def find_citations_for_cases_multithread(dataframe, username, password, threads)
                 big_incoming,
                 big_outgoing,
                 big_legislations,
+                bwbs,
+                opschrifts,
                 curr_ecli,
                 username,
                 password,
                 i,
                 bar,
+                extract_opschrift,
             ],
         )
         threads.append(t)
@@ -211,16 +269,9 @@ def find_citations_for_cases_multithread(dataframe, username, password, threads)
     add_column_from_list(dataframe, "citations_incoming", big_incoming)
     add_column_from_list(dataframe, "citations_outgoing", big_outgoing)
     add_column_from_list(dataframe, "legislations_cited", big_legislations)
-    # Iterate over big_legislations and find bwb_ids using regular expressions
-    for leg_citations in big_legislations:
-        for leg_citation in leg_citations:
-            match = re.search(r"bwb/id/([^/]+)", leg_citation)
-            if match:
-                bwb_list.append(match.group(1))
-            else:
-                bwb_list.append(None)
-    dataframe["bwb_id"] = pd.Series(bwb_list)
-
+    add_column_from_list(dataframe, "bwb_id", bwbs)
+    if extract_opschrift:
+        dataframe["opschrift"] = pd.concat(opschrifts, axis=0).reset_index(drop=True)
     return dataframe
 
 
@@ -388,7 +439,9 @@ def extract_results_legislations(list, ecli, fields, username, password):
     return list_of_all_results
 
 
-def get_citations(dataframe=None, username="", password="", threads=1):
+def get_citations(
+    dataframe=None, username="", password="", threads=1, extract_opschrift=False
+):
     if dataframe is None or not username or not password:
         logging.warning("Incorrect arguments passed. Returning...")
         return False
@@ -402,7 +455,9 @@ def get_citations(dataframe=None, username="", password="", threads=1):
     logging.info("\n--- START OF RS CITATIONS EXTRACTIONS ---\n")
 
     # find citations, and save the file incrementally
-    df = find_citations_for_cases_multithread(dataframe, username, password, threads)
+    df = find_citations_for_cases_multithread(
+        dataframe, username, password, threads, extract_opschrift
+    )
 
     logging.info("\n--- DONE ---")
     return df
