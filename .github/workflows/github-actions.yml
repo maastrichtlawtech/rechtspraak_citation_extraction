@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ main ]
 env:
-  RELEASE_VERSION: 1.1.0
+  RELEASE_VERSION: 1.2.0
 
 jobs:
   lint:

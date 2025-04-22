@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rechtspraak_citations_extractor"
 readme = {file = "README.md", content-type = "text/markdown"}
-version = "1.1.0"
+version = "1.2.0"
 requires-python = ">= 3.9"
 description = "Library for extracting rechtspraak citations for provided ECLIs"
 authors = [
