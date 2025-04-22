@@ -271,7 +271,7 @@ def find_citations_for_cases_multithread(
     add_column_from_list(dataframe, "legislations_cited", big_legislations)
     add_column_from_list(dataframe, "bwb_id", bwbs)
     if extract_opschrift:
-        dataframe['opschrift'] = pd.concat(opschrifts, axis=0).reset_index(drop=True)
+        dataframe["opschrift"] = pd.concat(opschrifts, axis=0).reset_index(drop=True)
     return dataframe
 
 
