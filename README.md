@@ -79,6 +79,52 @@ df = get_rechtspraak_metadata(save_file='n',dataframe=df)
 df_with_citaitons = rex_citations.get_citations(df,'username','password')
 ```
 
+## New Feature: GraphDB/SPARQL Citation Extraction
+
+This library now supports extracting citation data for Rechtspraak cases directly from a GraphDB (triple store) using SPARQL queries, as an alternative to the LIDO API. This is useful if you have loaded the LiDO data into a local or remote GraphDB instance (e.g., using the provided TTL file).
+
+### Available Functions
+- `find_citations_for_case_graphdb(ecli)`
+  - Extracts incoming/outgoing case citations and legislation citations for a single ECLI using SPARQL.
+- `find_citations_for_cases_multithread_graphdb(dataframe, threads=1)`
+  - Extracts citations for all ECLIs in a DataFrame using multithreading.
+
+### Parameters
+- **ecli**: The ECLI string for the case you want to extract citations for.
+- **dataframe**: A Pandas DataFrame with a column named 'ecli'.
+- **threads**: Number of threads to use for batch extraction (default: 1).
+
+### GraphDB Endpoint Configuration
+By default, the endpoint is set to `http://localhost:7200/repositories/rechtspraak`. You can change this in `citations_extractor.py`:
+```python
+GRAPHDB_ENDPOINT = "http://localhost:7200/repositories/rechtspraak"  # Change as needed
+```
+If your GraphDB requires authentication, set `GRAPHDB_USERNAME` and `GRAPHDB_PASSWORD` as well.
+
+### Example Usage
+```python
+from rechtspraak_citations_extractor.citations_extractor import find_citations_for_case_graphdb, find_citations_for_cases_multithread_graphdb
+import pandas as pd
+
+ecli_examples = ["ECLI:NL:HR:2020:1234", "ECLI:NL:HR:2021:5678"]
+df = pd.DataFrame({"ecli": ecli_examples})
+
+# Single case extraction
+for ecli in ecli_examples:
+    incoming, outgoing, legislations = find_citations_for_case_graphdb(ecli)
+    print(f"ECLI: {ecli}")
+    print("  Incoming:", incoming)
+    print("  Outgoing:", outgoing)
+    print("  Legislations:", legislations)
+
+# Batch extraction (multithreaded)
+df_result = find_citations_for_cases_multithread_graphdb(df, threads=2)
+print(df_result)
+```
+
+### Notes
+- The SPARQL queries assume a certain schema for ECLI and citation relationships. You may need to adjust the queries in `citations_extractor.py` if your GraphDB uses different predicates or structures.
+- Both LIDO and GraphDB extraction methods can be used side by side.
 
 ## License
 [![License: Apache 2.0](https://img.shields.io/github/license/maastrichtlawtech/extraction_libraries)](https://opensource.org/licenses/Apache-2.0)
