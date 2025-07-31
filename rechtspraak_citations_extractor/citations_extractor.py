@@ -461,3 +461,152 @@ def get_citations(
 
     logging.info("\n--- DONE ---")
     return df
+
+# === GRAPHDB/SPARQL CONFIGURATION ===
+GRAPHDB_ENDPOINT = "http://localhost:7200/repositories/rechtspraak"  # Change as needed
+GRAPHDB_USERNAME = None  # Set if authentication is required
+GRAPHDB_PASSWORD = None
+
+# === SPARQL QUERY HELPERS ===
+def run_sparql_query(query, endpoint=GRAPHDB_ENDPOINT, username=GRAPHDB_USERNAME, password=GRAPHDB_PASSWORD):
+    """Run a SPARQL query against the GraphDB endpoint and return results as rdflib.query.Result."""
+    g = rdflib.ConjunctiveGraph()
+    auth = None
+    if username and password:
+        auth = (username, password)
+    return g.query(query, initNs=None, initBindings=None, result=None, base=None, 
+                   initServices=None, endpoint=endpoint, 
+                   auth=auth)
+
+# === SPARQL TEMPLATES ===
+# These templates assume ECLI is stored as a literal or IRI fragment in the data. Adjust as needed.
+SPARQL_OUTGOING_CASES = '''
+PREFIX dct: <http://purl.org/dc/terms/>
+PREFIX rechtspraak: <http://psi.rechtspraak.nl/>
+SELECT ?target_ecli ?label ?type WHERE {
+  ?case dct:identifier "{ecli}" .
+  ?case rechtspraak:cites ?cited_case .
+  ?cited_case dct:identifier ?target_ecli .
+  OPTIONAL { ?cited_case dct:title ?label }
+  OPTIONAL { ?cited_case a ?type }
+}
+'''
+
+SPARQL_INCOMING_CASES = '''
+PREFIX dct: <http://purl.org/dc/terms/>
+PREFIX rechtspraak: <http://psi.rechtspraak.nl/>
+SELECT ?source_ecli ?label ?type WHERE {
+  ?case dct:identifier ?source_ecli .
+  ?case rechtspraak:cites ?target_case .
+  ?target_case dct:identifier "{ecli}" .
+  OPTIONAL { ?case dct:title ?label }
+  OPTIONAL { ?case a ?type }
+}
+'''
+
+SPARQL_LEGISLATION = '''
+PREFIX dct: <http://purl.org/dc/terms/>
+PREFIX rechtspraak: <http://psi.rechtspraak.nl/>
+SELECT ?legal_provision_url ?legal_provision WHERE {
+  ?case dct:identifier "{ecli}" .
+  ?case rechtspraak:refersTo ?legislation .
+  ?legislation dct:identifier ?legal_provision_url .
+  OPTIONAL { ?legislation dct:title ?legal_provision }
+}
+'''
+
+# === GRAPHDB CITATION EXTRACTION ===
+def find_citations_for_case_graphdb(ecli):
+    """Extract citations for a case from GraphDB using SPARQL."""
+    outgoing_query = SPARQL_OUTGOING_CASES.format(ecli=ecli)
+    incoming_query = SPARQL_INCOMING_CASES.format(ecli=ecli)
+    legislation_query = SPARQL_LEGISLATION.format(ecli=ecli)
+
+    outgoing = []
+    incoming = []
+    legislations = []
+
+    # Outgoing case citations
+    for row in run_sparql_query(outgoing_query):
+        outgoing.append({
+            target_ecli: str(row.target_ecli),
+            label: str(row.label) if hasattr(row, 'label') and row.label else None,
+            type: str(row.type) if hasattr(row, 'type') and row.type else None,
+        })
+    # Incoming case citations
+    for row in run_sparql_query(incoming_query):
+        incoming.append({
+            target_ecli: str(row.source_ecli),
+            label: str(row.label) if hasattr(row, 'label') and row.label else None,
+            type: str(row.type) if hasattr(row, 'type') and row.type else None,
+        })
+    # Legislation citations
+    for row in run_sparql_query(legislation_query):
+        legislations.append({
+            'legal_provision_url_lido': None,  # Not available from GraphDB
+            'legal_provision_url': str(row.legal_provision_url),
+            'legal_provision': str(row.legal_provision) if hasattr(row, 'legal_provision') and row.legal_provision else None,
+        })
+    return incoming, outgoing, legislations
+
+
+def find_citations_for_cases_multithread_graphdb(dataframe, threads=1):
+    ecli_list = dataframe["ecli"].dropna().reset_index(drop=True)
+    length = ecli_list.size
+    at_once_threads = int(length / threads) if threads > 1 else length
+    big_incoming = []
+    big_outgoing = []
+    big_legislations = []
+    thread_list = []
+    bar = tqdm(total=length, colour="GREEN", position=0, leave=True, miniters=int(length / 100) if length > 100 else 1, maxinterval=10000)
+
+    def worker(ecli_slice, current_index):
+        incoming_df = pd.Series([], dtype="string")
+        outgoing_df = pd.Series([], dtype="string")
+        legislations_df = pd.Series([], dtype="string")
+        for i, ecli in enumerate(ecli_slice):
+            index = current_index + i
+            case_citations_incoming, case_citations_outgoing, legislation_citations = find_citations_for_case_graphdb(remove_spaces_from_ecli(ecli))
+            if case_citations_incoming:
+                incoming_df[index] = json.dumps(case_citations_incoming)
+            if case_citations_outgoing:
+                outgoing_df[index] = json.dumps(case_citations_outgoing)
+            if legislation_citations:
+                legislations_df[index] = json.dumps(legislation_citations)
+            bar.update(1)
+        big_incoming.append(incoming_df)
+        big_outgoing.append(outgoing_df)
+        big_legislations.append(legislations_df)
+
+    for i in range(0, length, at_once_threads):
+        curr_ecli = ecli_list[i : (i + at_once_threads)]
+        t = threading.Thread(target=worker, args=(curr_ecli, i))
+        thread_list.append(t)
+    for t in thread_list:
+        t.start()
+    for t in thread_list:
+        t.join()
+    add_column_from_list(dataframe, "citations_incoming_graphdb", big_incoming)
+    add_column_from_list(dataframe, "citations_outgoing_graphdb", big_outgoing)
+    add_column_from_list(dataframe, "legislations_cited_graphdb", big_legislations)
+    return dataframe
+
+
+if __name__ == "__main__":
+    # USAGE EXAMPLE FOR GRAPHDB CITATION EXTRACTION
+    import pandas as pd
+    # Example ECLI list (replace with real ECLIs from your GraphDB)
+    ecli_examples = ["ECLI:NL:HR:2020:1234", "ECLI:NL:HR:2021:5678"]
+    df = pd.DataFrame({"ecli": ecli_examples})
+
+    print("--- Single case GraphDB extraction ---")
+    for ecli in ecli_examples:
+        incoming, outgoing, legislations = find_citations_for_case_graphdb(ecli)
+        print(f"ECLI: {ecli}")
+        print("  Incoming:", incoming)
+        print("  Outgoing:", outgoing)
+        print("  Legislations:", legislations)
+
+    print("\n--- Batch GraphDB extraction (multithreaded) ---")
+    df_result = find_citations_for_cases_multithread_graphdb(df, threads=2)
+    print(df_result)
